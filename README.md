@@ -1,27 +1,29 @@
-## Pseudolikelihood Reranking with Masked Language Models
+# Pseudolikelihood Reranking with Masked Language Models
 
-This repository will host code and experiments for the paper "Pseudolikelihood Reranking with Masked Language Models" by Julian Salazar, Davis Liang, Toan Q. Nguyen, and Katrin Kirchhoff, presented at the Workshop on Deep Learning for Low-Resource NLP (DeepLo), EMNLP-IJCNLP 2019.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**THIS CODEBASE IS A WORK IN PROGRESS.** It is licensed under the MIT-0 License. See the LICENSE file.
+**WORK IN PROGRESS.** This code implements *pseudolikelihood reranking* using pretrained masked LMs on n-best lists, with specific experiments in automatic speech recognition (ASR) and neural machine translation (NMT).
+
+Julian Salazar, Davis Liang, Toan Q. Nguyen, Katrin Kirchhoff. "[Pseudolikelihood Reranking with Masked Language Models](https://arxiv.org/abs/1910.14659)", *Workshop on Deep Learning for Low-Resource NLP (DeepLo)*, 2019. 
 
 ## Installation
 
-The ideal setup is a fresh Deep Learning Base AMI (Ubuntu 18.04, v20) on a GPU instance (p3.2xlarge or better). **If and only if** you are in this environment, feel free to use `./dlami-setup.sh`, which will install the relevant packages and set up a [pipenv](https://docs.pipenv.org/en/latest/) environment for the current folder.
+The ideal setup is a modern GPU instance (p3.2xlarge or better) with a Deep Learning Base AMI (Ubuntu 18.04, v20). *If and only if you are in this environment*, feel free to use `./dlami-setup.sh`, which installs the relevant packages and set up a [pipenv](https://pipenv.kennethreitz.org/en/latest/) environment for the current folder.
 
 Otherwise, you can install this package directly. Look at `./dlami-setup.sh` for guidance if you run into issues.
+```bash
+pipenv install --dev -e .
 ```
-pipenv install --python 3.7 --dev -e .
-```
-Note:
-- We use constructs from Python 3.7.
-- We assume CUDA 10 and MKL, so our Pipfile uses `mxnet-cu100mkl`. Replace with `mxnet-cu92`, `mxnet-mkl` (CPU only) as needed.
-- If using pipenv, remember to activate the environment (`pipenv shell`).
+Caveats:
+- Python 3.7+ is required.
+- CUDA 10 and Intel MKL are assumed; our Pipfile requires `mxnet-cu100mkl`. Replace with `mxnet-cu92`, `mxnet-mkl` (CPU only) as needed.
+- Use non-pipenv environments at your own risk.
 
 ## Example
 
-Experiments outputs will be placed in `exps/`.  Refer to the ASR section for some examples with GPUs, pretrained weights, etc.
+Experiment outputs will be placed in `exps/`.  Refer to the ASR section for command line arguments with GPUs, pretrained weights, etc.
 
-**NOTE:** We are awaiting permission from Shin et al., "Efficient Sentence Scoring with Bidirectional Language Models for Speech Recognition", 2019, to include their 100-best lists for LibriSpeech. If you wish, please contact them directly. They should placed in
+**NOTE:** We are waiting for permission from the authors of "[Effective Sentence Scoring Method using Bidirectional Language Model for Speech Recognition](https://arxiv.org/abs/1905.06655)" to include their 100-best lists for LibriSpeech. If you wish, please contact them directly. They should placed in
 ```
 data/librispeech-espnet/{dev-clean,dev-other,test-clean,test-other}.json
 ```
@@ -54,16 +56,13 @@ for weight in $(seq 0 0.05 1.0) ; do
 done
 ```
 
-## Experiments
+## ASR (LibriSpeech)
 
-### ASR
+The split sizes below are for a 4 GPU, Tesla V100 machine (`p3.8xlarge`). Scale appropriately for your GPU memory.
 
-Then for example, on a 4 GPU, Tesla V100 machine (`p3.8xlarge`):
+### Scoring
+
 ```bash
-set -e
-
-### SCORING ###
-
 # Stock BERT/RoBERTa base
 for set in dev-clean dev-other test-clean test-other ; do
     for model in bert-base-en-uncased bert-base-en-cased roberta-base-en-cased ; do
@@ -78,7 +77,6 @@ for set in dev-clean dev-other test-clean test-other ; do
             > exps/lpl/${model}/${set}.lm.json
     done
 done
-
 # Trained BERT base
 for set in dev-clean dev-other test-clean test-other ; do
     for model in bert-base-en-uncased ; do
@@ -93,10 +91,12 @@ for set in dev-clean dev-other test-clean test-other ; do
             > exps/lpl/${model}-380k/${set}.lm.json
     done
 done
+```
 
-### RESCORING (DEV) ###
+### Reranking
 
-# Stock BERT/RoBERTa
+```bash
+# Stock BERT/RoBERTa on development set
 for set in dev-clean ; do
     for model in bert-base-en-uncased bert-base-en-cased bert-large-en-uncased bert-large-en-cased roberta-base-en-cased roberta-large-en-cased ; do
         for weight in $(seq 0 0.05 1.0) ; do
@@ -111,9 +111,7 @@ for set in dev-clean ; do
     done
 done
 
-### RESCORING (TEST) ###
-
-# Once you have your hyperparameter, evaluate test
+# Once you have the best hyperparameter, evaluate test
 for set in test-clean ; do
     for tup in bert-base-en-uncased,,0.35 bert-base-en-cased,,0.35 bert-large-en-uncased,,0.40 bert-large-en-cased,,0.35 ; do
         IFS="," read model suffix weight <<< "${tup}"
@@ -127,12 +125,29 @@ for set in test-clean ; do
         done
     done
 done
-
 ```
 
-### NMT
+### Binning
+
+**TODO** To compute cross entropy statistics:
+```
+lpl bin
+```
+
+### Maskless finetuning
+
+**TODO** To train a regression model towards sentence scores:
+```
+lpl finetune
+```
+
+## NMT (TED Talks, IWSLT'15)
 
 **TODO**
+
+### Scoring
+
+### Reranking
 
 ## Development
 

@@ -21,14 +21,7 @@ Caveats:
 
 ## Example
 
-Experiment outputs will be placed in `exps/`.  Refer to the ASR section for command line arguments with GPUs, pretrained weights, etc.
-
-**NOTE:** We are waiting for permission from the authors of "[Effective Sentence Scoring Method using Bidirectional Language Model for Speech Recognition](https://arxiv.org/abs/1905.06655)" to include their 100-best lists for LibriSpeech. If you wish, please contact them directly. They should placed in
-```
-data/librispeech-espnet/{dev-clean,dev-other,test-clean,test-other}.json
-```
-
-For now, we show the expected format in `data/example.json`.
+Experiment outputs will be placed in `exps/`.  Refer to the ASR section for command line arguments with GPUs, pretrained weights, etc. Our commands are for rescoring the included ASR decoding outputs, but you can replace these with your own. We demonstrate the format in `data/example.json`.
 
 First, we get scores from BERT Base (uncased):
 ```bash
@@ -57,6 +50,8 @@ done
 ```
 
 ## ASR (LibriSpeech)
+
+We include the 100-best LibriSpeech decoding outputs from "[Effective Sentence Scoring Method using Bidirectional Language Model for Speech Recognition](https://arxiv.org/abs/1905.06655)" (Shin et al., 2019) with the authors' permission; please cite their work if reusing their lists. The outputs come from a 5-layer encoder, 1-layer decoder BLSTMP model implemented in ESPnet. The files are located in `data/librispeech-espnet/*.json`.
 
 The split sizes below are for a 4 GPU, Tesla V100 machine (`p3.8xlarge`). Scale appropriately for your GPU memory.
 
@@ -129,7 +124,7 @@ done
 
 ### Binning
 
-**TODO** To compute cross entropy statistics:
+**TODO** To compute cross-entropy statistics:
 ```
 lpl bin
 ```

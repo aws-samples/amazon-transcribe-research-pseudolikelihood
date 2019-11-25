@@ -1,4 +1,5 @@
 import argparse
+from contextlib import contextmanager
 import logging
 import math
 import os
@@ -26,6 +27,16 @@ def _shared_args(parser: argparse.ArgumentParser) -> None:
                         help="Model to (re)score; comma-delimited list of {}".format(SUPPORTED))
     parser.add_argument('--weights', type=str, default=None,
                         help="Model weights to load")
+
+
+@contextmanager
+def _stdout_to_stderr():
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
 
 
 # Converts a list "0,2,7" to [mx.gpu(0), mx.gpu(2), mx.gpu(7)]
@@ -171,7 +182,9 @@ def cmd_score(args: argparse.Namespace) -> None:
     # Get model
     ctxs = setup_ctxs(args.gpus)
     weights_file = Path(args.weights) if isinstance(args.weights, str) else None
-    model, vocab, tokenizer = get_pretrained(ctxs, args.model, weights_file, regression=args.no_mask)
+    # Redirect console output from GluonNLP downloading models
+    with _stdout_to_stderr():
+        model, vocab, tokenizer = get_pretrained(ctxs, args.model, weights_file, regression=args.no_mask)
 
     # Set scorer
     if isinstance(model, nlp.model.BERTModel):

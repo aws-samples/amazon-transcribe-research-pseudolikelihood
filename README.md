@@ -8,44 +8,45 @@ Julian Salazar, Davis Liang, Toan Q. Nguyen, Katrin Kirchhoff. "[Pseudolikelihoo
 
 ## Installation
 
-The ideal setup is a modern GPU instance (p3.2xlarge or better) with a Deep Learning Base AMI (Ubuntu 18.04, v20). *If and only if you are in this environment*, feel free to use `./dlami-setup.sh`, which installs the relevant packages and set up a [pipenv](https://pipenv.kennethreitz.org/en/latest/) environment for the current folder.
+Our setup is a fresh GPU instance (p3.2xlarge or better) with a Deep Learning Base AMI (Ubuntu 18.04, v20.2). *If and only if you are in this environment*, you can safely use `./dlami-setup.sh` to set the CUDA version, install relevant packages, and set up a [pipenv](https://pipenv.kennethreitz.org/en/latest/) environment in the current folder.
 
-Otherwise, you can install this package directly. Look at `./dlami-setup.sh` for guidance if you run into issues.
+Otherwise, install this package directly. Look at `./dlami-setup.sh` for guidance if you run into issues.
 ```bash
 pipenv install --dev -e .
 ```
 Caveats:
 - Python 3.7+ is required.
-- CUDA 10 and Intel MKL are assumed; our Pipfile requires `mxnet-cu100mkl`. Replace with `mxnet-cu92`, `mxnet-mkl` (CPU only) as needed.
+- CUDA 10.1 and Intel MKL are assumed; our Pipfile requires `mxnet-cu101mkl`. Replace with `mxnet-cu92`, `mxnet-mkl` (CPU only), etc. as needed.
 - Use non-pipenv environments at your own risk.
 
 ## Example
 
-Experiment outputs will be placed in `exps/`.  Refer to the ASR section for command line arguments with GPUs, pretrained weights, etc. Our commands are for rescoring the included ASR decoding outputs, but you can replace these with your own. We demonstrate the format in `data/example.json`.
+Experiment outputs will be placed in `exps/`.  Refer to the ASR section for command line arguments with GPUs, pretrained weights, etc. Our commands are for rescoring the included ASR decoding outputs, but you can replace these with your own. The format is summarized in `data/example.json`.
 
-First, we get scores from BERT Base (uncased):
+To demonstrate, we score the first 3 utterances of LibriSpeech `dev-other` on CPU using BERT base (uncased):
 ```bash
 mkdir -p exps/lpl/bert-base-en-uncased/
 lpl score \
     --mode hyp \
     --model bert-base-en-uncased \
-    --max-utts 1 \
+    --max-utts 3 \
+    --gpus -1 \
     --split-size 100 \
     data/librispeech-espnet/dev-other.json \
-    > exps/lpl/bert-base-en-uncased/dev-other-100.lm.json
+    > exps/lpl/bert-base-en-uncased/dev-other-3.lm.json
 ```
 
 We then rescore the acoustic model outputs:
 ```bash
 set -e
 for weight in $(seq 0 0.05 1.0) ; do
-    echo ${weight}; \
+    echo "lambda=${weight}"; \
     lpl rescore \
         --model bert-base-en-uncased \
         --weight ${weight} \
         data/librispeech-espnet/dev-other.json \
-        exps/lpl/bert-base-en-uncased/dev-other-100.lm.json \
-        > exps/lpl/bert-base-en-uncased/dev-other-100.lambda-${weight}.json
+        exps/lpl/bert-base-en-uncased/dev-other-3.lm.json \
+        > exps/lpl/bert-base-en-uncased/dev-other-3.lambda-${weight}.json
 done
 ```
 

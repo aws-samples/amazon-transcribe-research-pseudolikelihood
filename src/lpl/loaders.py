@@ -411,14 +411,25 @@ class ScoredCorpus(OrderedDict):
 
     @classmethod
     def from_files(cls, corpus_file: Path, score_file: Path, max_utts: Optional[int] = None) -> ScoredCorpus:
+        """Creates a ScoredCorpus from separate text and score files
+
+        Args:
+            corpus_file (Path): A file with a sentence per line
+            score_file (Path): A file with either a float or a list of floats/null per line
+            max_utts (Optional[int], optional): Number
+
+        Returns:
+            ScoredCorpus: Resulting object
+        """
         corpus = Corpus.from_file(corpus_file.open('rt'), max_utts=max_utts)
-        scores = [float(line) for idx, line in enumerate(score_file.open('rt')) if max_utts is None or idx < max_utts]
+        scores = [json.loads(line) for idx, line in enumerate(score_file.open('rt')) if max_utts is None or idx < max_utts]
         return ScoredCorpus.from_corpus_and_scores(corpus, scores)
 
 
     def to_file(self, fp: TextIO, scores_only: bool = False):
         for idx, data in self.items():
-            line = "{}\n".format(data['score'])
+            # Either a float or a list of floats/null
+            line = "{}\n".format(json.dumps(data['score']))
             if not scores_only:
                 line = "{} ".format(data['text']) + line
             fp.write(line)

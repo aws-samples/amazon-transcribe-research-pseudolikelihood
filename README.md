@@ -27,12 +27,12 @@ pip install gluonnlp==0.8.1 regex ... # etc.
 
 ### Scoring
 
-There are three scoring modes, depending on the model:
-- Log-pseudolikelihood (LPL) score: BERT, RoBERTa, multilingual BERT, XLM
-- Log probability score: GPT-2
-- Maskless LPL score: see [LibriSpeech maskless finetuning](examples/asr-librispeech-espnet/README.md)
-
 Run `lpl score --help` to see supported models, etc. See `examples/demo/format.json` for the file format. For inputs, "score" is optional. Outputs will add "score" fields containing LPL scores.
+
+There are three score types, depending on the model:
+- Log-pseudolikelihood (LPL) score: BERT, RoBERTa, multilingual BERT, XLM
+- Maskless LPL score: same (add `--no-mask`)
+- Log probability score: GPT-2
 
 We score hypotheses for 3 utterances of LibriSpeech `dev-other` on CPU using BERT base (uncased):
 ```bash
@@ -67,7 +67,7 @@ done
 
 ### Maskless finetuning
 
-**TODO**
+One can finetune masked LMs to give usable LPL scores without masking. See [LibriSpeech maskless finetuning](examples/asr-librispeech-espnet/README.md#maskless-finetuning).
 
 ## Examples
 

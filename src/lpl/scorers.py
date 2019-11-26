@@ -53,19 +53,19 @@ class BaseScorer(ABC):
         return dataset, batch_sampler, dataloader
 
 
-    def _num_true_toks(self, dataset):
+    def _true_tok_lens(self, dataset):
 
         # Compute sum (assumes dataset is in order; skips are allowed)
         prev_sent_idx = None
-        num_true_toks = []
+        true_tok_lens = []
         for tup in dataset:
             curr_sent_idx = tup[0]
             valid_length = tup[2]
             if curr_sent_idx != prev_sent_idx:
                 prev_sent_idx = curr_sent_idx
-                num_true_toks.append(valid_length - 2)
+                true_tok_lens.append(valid_length - 2)
 
-        return num_true_toks
+        return true_tok_lens
 
 
     def _split_batch(self, batch):
@@ -74,7 +74,9 @@ class BaseScorer(ABC):
         return zip(*[mx.gluon.utils.split_data(batch_compo, len(self._ctxs), batch_axis=0, even_split=False) for batch_compo in batch])
 
 
-    def score(self, corpus: Corpus, temp: float = 1.0, split_size: int = 2000, ratio: float = 1, num_workers: int = 10) -> List[float]:
+    def score(self, corpus: Corpus, temp: float = 1.0, split_size: int = 2000, ratio: float = 1, num_workers: int = 10, per_token: bool = False) -> List[float]:
+
+        assert not per_token
 
         ctx_cpu = mx.Context('cpu')
 
@@ -82,7 +84,7 @@ class BaseScorer(ABC):
         dataset, batch_sampler, dataloader = self._corpus_to_data(corpus, split_size, ratio, num_workers)
 
         # Get number of tokens
-        num_true_toks = self._num_true_toks(dataset)
+        true_tok_lens = self._true_tok_lens(dataset)
 
         # Compute scores
         scores = np.zeros((len(corpus),)) 
@@ -126,7 +128,7 @@ class BaseScorer(ABC):
         # In case there are leftovers
         sum_accumulated_scores()
 
-        return scores.tolist(), num_true_toks
+        return scores.tolist(), true_tok_lens
 
 
 class LLScorer(BaseScorer):
@@ -244,7 +246,7 @@ class LLBinner(LLScorer):
         dataset, batch_sampler, dataloader = self._corpus_to_data(corpus, split_size, ratio, num_workers)
 
         # Get number of tokens
-        num_true_toks = self._num_true_toks(dataset)
+        true_tok_lens = self._true_tok_lens(dataset)
 
         ### <DIFFERENT>
         max_length = 256
@@ -382,7 +384,7 @@ masked_id = {}
         return SimpleDataset(sents_expanded)
 
 
-    def score(self, corpus: Corpus, temp: float = 1.0, split_size: int = 2000, ratio: float = 0, num_workers: int = 10) -> List[float]:
+    def score(self, corpus: Corpus, temp: float = 1.0, split_size: int = 2000, ratio: float = 0, num_workers: int = 10, per_token: bool = False) -> List[float]:
 
         ctx_cpu = mx.Context('cpu')
 
@@ -403,17 +405,19 @@ masked_id = {}
         logging.info(batch_sampler.stats())
         dataloader = nlp.data.ShardedDataLoader(dataset, pin_memory=True, batch_sampler=batch_sampler, batchify_fn=batchify_fn, num_workers=num_workers, thread_pool=True)
 
-        # Compute scores
-        scores = np.zeros((len(corpus),)) 
-        scores_per_ctx = [mx.nd.zeros((len(corpus),), ctx=ctx) for ctx in self._ctxs]
-
-        # Compute sum (assumes dataset is in order)
+        # Get lengths in tokens (assumes dataset is in order)
         prev_sent_idx = None
-        num_true_toks = []
+        true_tok_lens = []
         for (curr_sent_idx, _, valid_length, _, _, _) in dataset:
             if curr_sent_idx != prev_sent_idx:
                 prev_sent_idx = curr_sent_idx
-                num_true_toks.append(valid_length - 2)
+                true_tok_lens.append(valid_length - 2)
+
+        # Compute scores (total or per-position)
+        if per_token:
+            scores_per_token = [[None]*(true_tok_len+2) for true_tok_len in true_tok_lens]
+        else:
+            scores = np.zeros((len(corpus),))
 
         sent_count = 0
         batch_log_interval = 20
@@ -421,13 +425,20 @@ masked_id = {}
         batch_score_accumulation = 1
         batch_sent_idxs_per_ctx = [[] for ctx in self._ctxs]
         batch_scores_per_ctx = [[] for ctx in self._ctxs]
+        batch_masked_positions_per_ctx = [[] for ctx in self._ctxs]
 
         def sum_accumulated_scores():
             for ctx_idx in range(len(self._ctxs)):
-                for batch_sent_idxs, batch_scores in zip(batch_sent_idxs_per_ctx[ctx_idx], batch_scores_per_ctx[ctx_idx]):
-                    np.add.at(scores, batch_sent_idxs.asnumpy(), batch_scores.asnumpy())
+                for batch_sent_idxs, batch_scores, batch_masked_positions in zip(batch_sent_idxs_per_ctx[ctx_idx], batch_scores_per_ctx[ctx_idx], batch_masked_positions_per_ctx[ctx_idx]):
+                    if per_token:
+                        # Slow; only use when necessary
+                        for batch_sent_idx, batch_score, batch_masked_position in zip(batch_sent_idxs, batch_scores, batch_masked_positions):
+                            scores_per_token[batch_sent_idx.asscalar()][int(batch_masked_position.asscalar())] = batch_score.asscalar().item()
+                    else:
+                        np.add.at(scores, batch_sent_idxs.asnumpy(), batch_scores.asnumpy())
                 batch_sent_idxs_per_ctx[ctx_idx] = []
                 batch_scores_per_ctx[ctx_idx] = []
+                batch_masked_positions_per_ctx[ctx_idx] = []
 
         # For now just predicts the first non-cls token
         for batch_id, batch in enumerate(dataloader):
@@ -456,7 +467,7 @@ masked_id = {}
                 split_size = token_ids.shape[0]
                 # out[0] contains the representations
                 # out[1] is what contains the distribution for the masked
-                
+
                 # TODO: Manual numerically-stable softmax
                 # https://stackoverflow.com/questions/42599498/numercially-stable-softmax
                 # Because we only need one scalar
@@ -466,6 +477,7 @@ masked_id = {}
                 batch_sent_idxs_per_ctx[ctx_idx].append(sent_idxs)
                 out = out[list(range(split_size)), [0]*split_size, token_masked_ids.as_in_context(ctx).reshape(-1)]
                 batch_scores_per_ctx[ctx_idx].append(out)
+                batch_masked_positions_per_ctx[ctx_idx].append(masked_positions)
 
             # Ideally we'd accumulate the scores when possible, but something like the below won't work
             # > scores[sent_idxs] += out
@@ -484,7 +496,10 @@ masked_id = {}
         # In case there are leftovers
         sum_accumulated_scores()
 
-        return scores.tolist(), num_true_toks
+        if per_token:
+            return scores_per_token, true_tok_lens
+        else:
+            return scores.tolist(), true_tok_lens
 
 
 class LPLBinner(LPLScorer):
@@ -523,11 +538,11 @@ class LPLBinner(LPLScorer):
 
         # Compute sum (assumes dataset is in order)
         prev_sent_idx = None
-        num_true_toks = []
+        true_tok_lens = []
         for (curr_sent_idx, _, valid_length, _, _, _) in dataset:
             if curr_sent_idx != prev_sent_idx:
                 prev_sent_idx = curr_sent_idx
-                num_true_toks.append(valid_length - 2)
+                true_tok_lens.append(valid_length - 2)
 
         sent_count = 0
         batch_log_interval = 20
@@ -589,12 +604,12 @@ class RegressionFinetuner(BaseScorer):
         self._batchify_fn = btf.Tuple(btf.Stack(dtype='int32'), btf.Pad(pad_val=np.iinfo(np.int32).max, dtype='int32'),
                               btf.Stack(dtype='float32'), btf.Stack(dtype='float32'))
         self._trainer = mx.gluon.Trainer(self._model.collect_params(), 'adam',
-                           {'learning_rate': 5e-6, 'epsilon': 1e-9}, update_on_kvstore=False)
+                           {'learning_rate': 1e-5, 'epsilon': 1e-9}, update_on_kvstore=False)
         self._loss = mx.gluon.loss.L2Loss()
         self._loss.hybridize(static_alloc=True)
         self._params = [p for p in self._model.collect_params().values() if p.grad_req != 'null']
 
-        self._max_length = 256
+        self._max_length = 384
 
 
     def corpus_to_dataset(self, corpus: ScoredCorpus) -> SimpleDataset:
@@ -662,10 +677,10 @@ class RegressionFinetuner(BaseScorer):
         dataset, batch_sampler, dataloader = self._corpus_to_data(scored_corpus, split_size, ratio, num_workers, shuffle=True)
 
         # Get number of tokens
-        num_true_toks = self._num_true_toks(dataset)
+        true_tok_lens = self._true_tok_lens(dataset)
 
-        batch_log_interval = 20
-        num_epochs = 20
+        batch_log_interval = 500
+        num_epochs = 10
 
         # For now just predicts the first non-cls token
         for epoch_id in range(num_epochs):
@@ -688,9 +703,9 @@ class RegressionFinetuner(BaseScorer):
 
             logging.warning("Finished epoch {}".format(epoch_id))
             logging.warning("Epoch loss: {}".format(epoch_loss / sent_count))
-            self._model.save_parameters(str(output_dir / 'epoch-{}.params'.format(epoch_id)))
+            self._model.save_parameters(str(output_dir / 'epoch-{}.params'.format(epoch_id+1)))
 
-        return num_true_toks
+        return true_tok_lens
 
 
 class RegressionScorer(BaseScorer):

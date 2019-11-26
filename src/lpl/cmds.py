@@ -95,6 +95,8 @@ def main() -> None:
     parser_score.set_defaults(capitalize=None)
     parser_score.add_argument('--whole-word-mask', action='store_true',
                         help="mask whole words")
+    parser_score.add_argument('--per-token', action='store_true',
+                        help="output lists of per-token scores (slower)")
     parser_score.add_argument('infile', nargs='?', type=argparse.FileType('rt'),
                         help="File to score (.json = ESPNet JSON, otherwise newline-separated text). Loads whole file into memory!")
     parser_score.set_defaults(func=cmd_score)
@@ -214,26 +216,28 @@ def cmd_score(args: argparse.Namespace) -> None:
     # === START SHARED COMPUTATION ===
 
     # A scorer takes a corpus and produces a list of scores in order of the corpus
-    scores, num_true_toks = scorer.score(corpus, ratio=1, split_size=args.split_size)
+    scores, true_tok_lens = scorer.score(corpus, ratio=1, split_size=args.split_size, per_token=args.per_token)
     scored_corpus = ScoredCorpus.from_corpus_and_scores(corpus, scores)
 
     num_words_total, max_sent_len = corpus.get_num_words()
     logging.warn("# words (no added markers): {}".format(num_words_total))
     logging.warn("longest sentence: {}".format(max_sent_len))
 
-    num_toks_total = sum(num_true_toks)
+    num_toks_total = sum(true_tok_lens)
     logging.warn("# toks (including EOS '.'): {}".format(num_toks_total))
 
-    plls = np.array(scores)
-    pppl_tok = np.exp(- plls.sum() / num_toks_total).item()
-    logging.warn("Token-level (P)PPL: {}".format(pppl_tok))
+    if not args.per_token:
+        # TODO: In the per_token case, we just need to take the sum of each sublist
+        plls = np.array(scores)
+        pppl_tok = np.exp(- plls.sum() / num_toks_total).item()
+        logging.warn("Token-level (P)PPL: {}".format(pppl_tok))
 
-    if not args.no_eos:
-        logging.warn("Adding EOSes '.' to (P)PPL computation")
-        num_words_total += len(scores)
+        if not args.no_eos:
+            logging.warn("Adding EOSes '.' to (P)PPL computation")
+            num_words_total += len(scores)
 
-    pppl_word = math.exp((num_toks_total / num_words_total) * math.log(pppl_tok))
-    logging.warn("Word-level (P)PPL: {}".format(pppl_word))
+        pppl_word = math.exp((num_toks_total / num_words_total) * math.log(pppl_tok))
+        logging.warn("Word-level (P)PPL: {}".format(pppl_word))
 
     # === END SHARED COMPUTATION ===
 
@@ -398,8 +402,8 @@ def cmd_finetune(args: argparse.Namespace) -> None:
     model, vocab, tokenizer = get_pretrained(ctxs, args.model, weights_file, regression=True, freeze=args.freeze)
     # model.hybridize(static_alloc=True)
 
-    for corpus_file in Path(args.corpus_dir).glob('part.*'):
-        score_file = Path(args.score_dir) / (corpus_file.name + '.ref.score')
+    for corpus_file in sorted(Path(args.corpus_dir).glob('part.*')):
+        score_file = Path(args.score_dir) / (corpus_file.name + '.ref.scores')
         if not score_file.is_file():
             raise ValueError("Corpus file '{}' found but score file '{}' not found".format(corpus_file, score_file))
         logging.warn("Loading corpus from '{}' and scores from '{}'".format(corpus_file, score_file))
